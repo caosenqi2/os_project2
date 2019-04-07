@@ -99,6 +99,9 @@ extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
 extern int sys_enable_sched_trace(void);
+extern int sys_setrunningticks(void);
+extern int sys_setwaitingticks(void);
+extern int sys_setpriority(void);
 
 
 static int (*syscalls[])(void) = {
@@ -124,7 +127,9 @@ static int (*syscalls[])(void) = {
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
 [SYS_enable_sched_trace]   sys_enable_sched_trace,
-
+[SYS_setrunningticks]   sys_setrunningticks,
+[SYS_setwaitingticks]   sys_setwaitingticks,
+[SYS_setpriority]   sys_setpriority,
 };
 
 void

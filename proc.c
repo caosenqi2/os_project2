@@ -7,6 +7,10 @@
 #include "proc.h"
 #include "spinlock.h"
 
+int sched_policy = 1;
+int RUNNING_THRESHOLD = 2;
+int WAITING_THRESHOLD = 4;
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -16,7 +20,7 @@ static struct proc *initproc;
 
 int nextpid = 1;
 
-int sched_trace_enabled = 0; // for CS550 CPU/process project
+int sched_trace_enabled = 1; // for CS550 CPU/process project
 
 extern void forkret(void);
 extern void trapret(void);
@@ -50,6 +54,10 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->queue = 0;
+  p->running_tick = 0;
+  p->waiting_tick = 0;
+  p->priority = 100;
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -257,6 +265,29 @@ wait(void)
   }
 }
 
+int setrunningticks(int time_allotment){
+    RUNNING_THRESHOLD = time_allotment;
+    return 0;
+}
+
+int setwaitingticks(int waiting_thres){
+   WAITING_THRESHOLD = waiting_thres;
+   return 0;
+}
+
+int setpriority(int pid, int priority){
+    struct proc *p2;
+    acquire(&ptable.lock);
+    for(p2 = ptable.proc; p2 < &ptable.proc[NPROC]; p2++){
+        if(p2->pid == pid) {
+	    if (priority == 0) p2->queue=0;
+            p2->priority = priority;
+	}
+    }
+    release(&ptable.lock);
+    return 0;
+}
+
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
@@ -268,10 +299,11 @@ wait(void)
 void
 scheduler(void)
 {
-  struct proc *p;
+  struct proc *p;struct proc *p1;
   int ran = 0; // CS550: to solve the 100%-CPU-utilization-when-idling problem
 
   for(;;){
+    if(sched_policy ==0){// run Round Rubin scheduler below
     // Enable interrupts on this processor.
     sti();
 
@@ -281,9 +313,8 @@ scheduler(void)
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
-
       ran = 1;
-      
+
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
@@ -303,6 +334,79 @@ scheduler(void)
         halt();
     }
   }
+
+  if(sched_policy == 1){ // run MLFQ scheduler below
+    // Enable interrupts on this processor.
+    sti();
+
+    // Loop over process table looking for process to run.
+    acquire(&ptable.lock);
+    ran = 0;
+    
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->state != RUNNABLE || p->queue!=0){	
+	continue;}
+     // cprintf("pid:%d running_tick:%d waiting_tick:%d pinned%d queue:%d",p->pid,p->running_tick,p->waiting_tick, p->priority,p->queue);
+      ran = 1;
+      // Switch to chosen process.  It is the process's job
+      // to release ptable.lock and then reacquire it
+      // before jumping back to us.
+      proc = p;
+      switchuvm(p);
+      p->state = RUNNING;
+      swtch(&cpu->scheduler, proc->context);
+      switchkvm(); 
+
+      if(p->priority != 0) proc->running_tick += 1;
+      if(p->running_tick > RUNNING_THRESHOLD && p->pid != 1 && p->pid != 2 && p->priority != 0){
+	      p->queue = 1; 
+	      p->waiting_tick = 0;
+	      p->running_tick=0;
+      }
+      
+      // Process is done running for now.
+      // It should have changed its p->state before coming back.
+      proc = 0;
+     }
+
+    if (ran==0){
+    p1 = ptable.proc;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if (p->state == RUNNABLE && p->queue==1){
+	 if(p->waiting_tick >= p1->waiting_tick) p1 = p;
+        }
+      }
+    ran=1;
+   //cprintf("pid:%d running_tick:%d waiting_tick:%d pinned%d queue:%d ",p1->pid,p1->running_tick,p1->waiting_tick, p1->priority,p1->queue);
+    p1->waiting_tick -= 1;
+    proc = p1;
+    switchuvm(p1);
+    p1->state = RUNNING;
+    swtch(&cpu->scheduler, proc->context);
+    switchkvm(); 
+    proc = 0;
+    }
+
+   if(ran==1){
+   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->queue == 1){
+      	 p->waiting_tick += 1;
+         if(p->waiting_tick > WAITING_THRESHOLD){
+		 p->queue = 0;
+		 p->running_tick = 0;
+		 p->waiting_tick=0;
+	 }
+      }
+    }
+   }
+   release(&ptable.lock);
+
+    if (ran == 0){
+        halt();
+    }
+  }
+  }
+
 }
 
 // Enter scheduler.  Must hold only ptable.lock

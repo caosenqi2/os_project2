@@ -100,3 +100,27 @@ int sys_enable_sched_trace(void)
 
   return 0;
 }
+
+int 
+sys_setrunningticks(void){
+  int tick;
+  if (argint(0,&tick)<0) return 1;
+  return setrunningticks(tick);
+}
+
+int 
+sys_setwaitingticks(void){
+  int tick;
+  if (argint(0,&tick)<0) return 1;
+  return setwaitingticks(tick);
+}
+
+int 
+sys_setpriority(void){
+  int pid;
+  int priority;
+  if (argint(0,&pid)<0) return 1;
+  if (argint(1,&priority)<0) return 1;
+  return setpriority(pid, priority);
+}
+
